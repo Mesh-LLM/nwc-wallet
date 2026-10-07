@@ -8,7 +8,8 @@ use serde_json::json;
 use super::*;
 
 /// A minimal wallet service: answers `get_balance`, refuses everything else
-/// with `NOT_IMPLEMENTED`, and replies in the cipher the request used.
+/// with `NOT_IMPLEMENTED`, and replies in the cipher the request used. Each
+/// real answer is preceded by decoys the client must not take as the answer.
 async fn run_wallet_service(relay: RelayUrl, wallet: Keys, speaks_nip44: bool) -> Client {
     let client = Client::new();
     client.add_relay(&relay).await.unwrap();
@@ -53,14 +54,30 @@ async fn run_wallet_service(relay: RelayUrl, wallet: Keys, speaks_nip44: bool) -
                 })
             };
             let cipher = if nip04 { Cipher::Nip04 } else { Cipher::Nip44 };
-            let sealed = cipher
-                .encrypt(&wallet, &event.pubkey, &response.to_string())
+            let reply = |signer: &Keys, request: EventId, response: &Value| {
+                let sealed = cipher
+                    .encrypt(signer, &event.pubkey, &response.to_string())
+                    .unwrap();
+                EventBuilder::new(Kind::from_u16(RESPONSE_KIND), sealed)
+                    .tags([Tag::public_key(event.pubkey), Tag::event(request)])
+                    .finalize(signer)
+                    .unwrap()
+            };
+            // Answers the client must ignore, sent before the real one: one
+            // from a key other than the wallet's, and one from the wallet to
+            // a different request.
+            let decoy = json!({"result_type": method, "result": {"balance": 1}});
+            let elsewhere = EventId::from_byte_array([0; 32]);
+            for fake in [
+                reply(&Keys::generate(), event.id, &decoy),
+                reply(&wallet, elsewhere, &decoy),
+            ] {
+                responder.send_event(&fake).await.unwrap();
+            }
+            responder
+                .send_event(&reply(&wallet, event.id, &response))
+                .await
                 .unwrap();
-            let reply = EventBuilder::new(Kind::from_u16(RESPONSE_KIND), sealed)
-                .tags([Tag::public_key(event.pubkey), Tag::event(event.id)])
-                .finalize(&wallet)
-                .unwrap();
-            responder.send_event(&reply).await.unwrap();
 
             let notification = json!({
                 "notification_type": "payment_received",
