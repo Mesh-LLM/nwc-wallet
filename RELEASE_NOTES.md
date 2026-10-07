@@ -2,7 +2,7 @@ Standalone Nostr Wallet Connect (NIP-47) wallet provider for mesh-llm's
 `wallet.v1` capability. Install with:
 
 ```sh
-mesh-llm plugins install benthecarman/nwc-wallet
+mesh-llm plugins install Mesh-LLM/nwc-wallet
 ```
 
 Then pass the connection URI file in the plugin's `[[plugin]]` stanza:

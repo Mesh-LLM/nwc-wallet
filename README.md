@@ -13,7 +13,7 @@ only needs the connection URI.
 No release is published yet. Once one is:
 
 ```sh
-mesh-llm plugins install benthecarman/nwc-wallet
+mesh-llm plugins install Mesh-LLM/nwc-wallet
 ```
 
 Until then, build an archive (see Development) and install it with:
