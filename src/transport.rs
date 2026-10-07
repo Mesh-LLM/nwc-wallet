@@ -140,7 +140,12 @@ impl RelayTransport {
         // to install a provider first.
         let _ = rustls::crypto::ring::default_provider().install_default();
         let keys = Keys::new(uri.secret.clone());
-        let client = Client::new();
+        // Relays that require NIP-42 AUTH serve wallet events only to an
+        // authenticated client; the connection's key is the identity the
+        // wallet already answers to.
+        let client = Client::builder()
+            .authenticator(SignerAuthenticator::new(keys.clone()))
+            .build();
         for relay in &uri.relays {
             client
                 .add_relay(relay)
@@ -277,10 +282,26 @@ impl Transport for RelayTransport {
             pending: &self.pending,
             id: event.id,
         };
-        if let Err(error) = self.client.send_event(&event).await {
-            return Err(TransportError::NoResponse(format!(
-                "publish request: {error}"
-            )));
+        match self.client.send_event(&event).await {
+            Err(error) => {
+                return Err(TransportError::NoResponse(format!(
+                    "publish request: {error}"
+                )));
+            }
+            // Every relay refused it, so no answer is coming. A refusal is
+            // still not proof the wallet never saw it.
+            Ok(output) if output.success.is_empty() && !output.failed.is_empty() => {
+                let reasons: Vec<String> = output
+                    .failed
+                    .iter()
+                    .map(|(relay, reason)| format!("{relay}: {reason}"))
+                    .collect();
+                return Err(TransportError::NoResponse(format!(
+                    "relays rejected the request: {}",
+                    reasons.join("; ")
+                )));
+            }
+            Ok(_) => {}
         }
         match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(response)) => self.decode_response(method, &response),
@@ -331,8 +352,23 @@ async fn route(
     notifications: broadcast::Sender<Notification>,
 ) {
     while let Some(notification) = events.next().await {
-        let ClientNotification::Event { event, .. } = notification else {
-            continue;
+        let event = match notification {
+            ClientNotification::Event { event, .. } => event,
+            ClientNotification::Message { relay_url, message } => {
+                // A relay that ends the subscription (for example because it
+                // requires AUTH) leaves every request waiting for a response
+                // that cannot arrive, so say why.
+                if let RelayMessage::Closed { message, .. } = *message {
+                    tracing::warn!(
+                        target: "mesh_wallet_nwc",
+                        relay = %relay_url,
+                        reason = %message,
+                        "relay closed the wallet subscription"
+                    );
+                }
+                continue;
+            }
+            ClientNotification::Shutdown => break,
         };
         if event.pubkey != wallet {
             continue;

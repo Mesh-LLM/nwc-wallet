@@ -2,7 +2,13 @@
 //! service, so event kinds, tags, ciphers and response routing are exercised
 //! end to end.
 
-use nostr_sdk::prelude::MockRelay;
+use std::net::SocketAddr;
+use std::pin::Pin;
+
+use nostr_sdk::prelude::{
+    LocalRelay, LocalRelayBuilderNip42, MachineReadablePrefix, MockRelay, WritePolicy,
+    WritePolicyResult,
+};
 use serde_json::json;
 
 use super::*;
@@ -11,7 +17,9 @@ use super::*;
 /// with `NOT_IMPLEMENTED`, and replies in the cipher the request used. Each
 /// real answer is preceded by decoys the client must not take as the answer.
 async fn run_wallet_service(relay: RelayUrl, wallet: Keys, speaks_nip44: bool) -> Client {
-    let client = Client::new();
+    let client = Client::builder()
+        .authenticator(SignerAuthenticator::new(wallet.clone()))
+        .build();
     client.add_relay(&relay).await.unwrap();
     client.connect().and_wait(Duration::from_secs(5)).await;
     let mut info = EventBuilder::new(Kind::from_u16(INFO_KIND), "get_balance pay_invoice");
@@ -112,6 +120,10 @@ fn uri(relay: &RelayUrl, wallet: &Keys) -> NostrWalletConnectUri {
 
 async fn round_trip(speaks_nip44: bool) {
     let relay = MockRelay::run().await.unwrap();
+    round_trip_through(&relay, speaks_nip44).await;
+}
+
+async fn round_trip_through(relay: &LocalRelay, speaks_nip44: bool) {
     let url = relay.url().await;
     let wallet = Keys::generate();
     let _service = run_wallet_service(url.clone(), wallet.clone(), speaks_nip44).await;
@@ -163,6 +175,59 @@ async fn nip44_wallet_round_trips_requests_and_notifications() {
 #[tokio::test]
 async fn legacy_nip04_wallet_round_trips_requests_and_notifications() {
     round_trip(false).await;
+}
+
+#[tokio::test]
+async fn relay_that_requires_auth_is_answered() {
+    let relay = LocalRelay::builder()
+        .nip42(LocalRelayBuilderNip42::read_and_write())
+        .build();
+    relay.run().await.unwrap();
+    round_trip_through(&relay, true).await;
+}
+
+/// Refuses wallet requests, as a relay that bans the kind would.
+#[derive(Debug)]
+struct RefuseRequests;
+
+impl WritePolicy for RefuseRequests {
+    fn admit_event<'a>(
+        &'a self,
+        event: &'a Event,
+        _addr: &'a SocketAddr,
+    ) -> Pin<Box<dyn Future<Output = WritePolicyResult> + Send + 'a>> {
+        Box::pin(async move {
+            if event.kind.as_u16() == REQUEST_KIND {
+                WritePolicyResult::reject(MachineReadablePrefix::Blocked, "no wallet requests")
+            } else {
+                WritePolicyResult::Accept
+            }
+        })
+    }
+}
+
+#[tokio::test]
+async fn a_request_every_relay_refuses_reports_why_without_waiting() {
+    let relay = LocalRelay::builder().write_policy(RefuseRequests).build();
+    relay.run().await.unwrap();
+    let url = relay.url().await;
+    let wallet = Keys::generate();
+    let transport = RelayTransport::connect(&uri(&url, &wallet), Duration::from_secs(2))
+        .await
+        .unwrap();
+    let refused = tokio::time::timeout(
+        Duration::from_secs(30),
+        transport.request("get_balance", json!({}), Duration::from_secs(60)),
+    )
+    .await
+    .expect("a refusal must not wait for the response timeout");
+    match refused {
+        // Refused is still uncertain: only an unsent request proves nothing.
+        Err(TransportError::NoResponse(reason)) => {
+            assert!(reason.contains("no wallet requests"), "{reason}");
+        }
+        other => panic!("expected an uncertain refusal, got {other:?}"),
+    }
 }
 
 #[tokio::test]

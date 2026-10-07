@@ -82,7 +82,9 @@ What NWC cannot guarantee, and how the plugin reports it:
   output gate on settlement rather than on the earlier claiming signal.
 
 The plugin opens one relay subscription before sending any request, so a
-response or notification cannot be missed. Requests carry an expiration tag so
+response or notification cannot be missed. It answers NIP-42 AUTH challenges
+with the connection's key, so relays that require AUTH work, and logs a relay
+that closes the subscription. Requests carry an expiration tag so
 a late-delivered request is not executed after the plugin stopped waiting.
 Settlement waits wake on notifications and poll `lookup_invoice` as the
 backstop, since relays may drop notifications. A payment is reported as not
