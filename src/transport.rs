@@ -22,6 +22,8 @@ const REQUEST_KIND: u16 = 23194;
 const RESPONSE_KIND: u16 = 23195;
 const NIP04_NOTIFICATION_KIND: u16 = 23196;
 const NIP44_NOTIFICATION_KIND: u16 = 23197;
+/// How far behind this machine's clock the wallet's clock may run.
+const CLOCK_SKEW_ALLOWANCE: Duration = Duration::from_secs(10 * 60);
 
 /// Why a request produced no result.
 #[derive(Debug)]
@@ -168,6 +170,23 @@ impl RelayTransport {
             .await
             .context("fetch wallet info event")?;
         let cipher = Cipher::from_info(info.first());
+        // Relay URLs and the wallet's key are public; the URI's secret is
+        // never logged.
+        tracing::info!(
+            target: "mesh_wallet_nwc",
+            relays = ?uri.relays.iter().map(RelayUrl::as_str).collect::<Vec<_>>(),
+            wallet = %uri.public_key,
+            info_event_found = !info.is_empty(),
+            cipher = ?cipher,
+            "connected to the wallet's relays"
+        );
+        if info.is_empty() {
+            tracing::warn!(
+                target: "mesh_wallet_nwc",
+                "the wallet's info event is not on its relays; check that the wallet service \
+                 is running and uses the relay in the connection URI"
+            );
+        }
         let advertised_methods = info
             .first()
             .map(|event| {
@@ -194,7 +213,12 @@ impl RelayTransport {
                     ])
                     .author(uri.public_key)
                     .pubkey(keys.public_key())
-                    .since(Timestamp::now()),
+                    // The wallet stamps events with its own clock. Starting
+                    // at this clock's "now" would drop every response from a
+                    // wallet whose clock runs a little behind. Older events
+                    // are harmless: responses match by request id, and a
+                    // stale notification only prompts a lookup.
+                    .since(Timestamp::now() - CLOCK_SKEW_ALLOWANCE),
             )
             .await
             .context("subscribe to wallet responses")?;
@@ -306,9 +330,17 @@ impl Transport for RelayTransport {
         match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(response)) => self.decode_response(method, &response),
             Ok(Err(_)) => Err(TransportError::NoResponse("wallet listener stopped".into())),
-            Err(_) => Err(TransportError::NoResponse(format!(
-                "no {method} response within {timeout:?}"
-            ))),
+            Err(_) => {
+                tracing::warn!(
+                    target: "mesh_wallet_nwc",
+                    method,
+                    request = %event.id,
+                    "no response from the wallet service"
+                );
+                Err(TransportError::NoResponse(format!(
+                    "no {method} response within {timeout:?}"
+                )))
+            }
         }
     }
 
@@ -358,13 +390,20 @@ async fn route(
                 // A relay that ends the subscription (for example because it
                 // requires AUTH) leaves every request waiting for a response
                 // that cannot arrive, so say why.
-                if let RelayMessage::Closed { message, .. } = *message {
-                    tracing::warn!(
+                match *message {
+                    RelayMessage::Closed { message, .. } => tracing::warn!(
                         target: "mesh_wallet_nwc",
                         relay = %relay_url,
                         reason = %message,
                         "relay closed the wallet subscription"
-                    );
+                    ),
+                    RelayMessage::Notice(message) => tracing::warn!(
+                        target: "mesh_wallet_nwc",
+                        relay = %relay_url,
+                        notice = %message,
+                        "relay notice"
+                    ),
+                    _ => {}
                 }
                 continue;
             }

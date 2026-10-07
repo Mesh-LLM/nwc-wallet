@@ -13,9 +13,16 @@ use serde_json::json;
 
 use super::*;
 
+/// The wallet service's clock runs behind the client's, as it may on
+/// another machine, so its events predate the client's subscription.
+fn slow_clock() -> Timestamp {
+    Timestamp::now() - Duration::from_secs(30)
+}
+
 /// A minimal wallet service: answers `get_balance`, refuses everything else
-/// with `NOT_IMPLEMENTED`, and replies in the cipher the request used. Each
-/// real answer is preceded by decoys the client must not take as the answer.
+/// with `NOT_IMPLEMENTED`, and replies in the cipher the request used, with
+/// a slow clock. Each real answer is preceded by decoys the client must not
+/// take as the answer.
 async fn run_wallet_service(relay: RelayUrl, wallet: Keys, speaks_nip44: bool) -> Client {
     let client = Client::builder()
         .authenticator(SignerAuthenticator::new(wallet.clone()))
@@ -68,6 +75,7 @@ async fn run_wallet_service(relay: RelayUrl, wallet: Keys, speaks_nip44: bool) -
                     .unwrap();
                 EventBuilder::new(Kind::from_u16(RESPONSE_KIND), sealed)
                     .tags([Tag::public_key(event.pubkey), Tag::event(request)])
+                    .custom_created_at(slow_clock())
                     .finalize(signer)
                     .unwrap()
             };
@@ -101,6 +109,7 @@ async fn run_wallet_service(relay: RelayUrl, wallet: Keys, speaks_nip44: bool) -
             };
             let note = EventBuilder::new(Kind::from_u16(kind), sealed)
                 .tag(Tag::public_key(event.pubkey))
+                .custom_created_at(slow_clock())
                 .finalize(&wallet)
                 .unwrap();
             responder.send_event(&note).await.unwrap();
