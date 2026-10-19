@@ -264,8 +264,14 @@ mod tests {
         NwcArgs::parse(&args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>())
     }
 
+    /// An absolute path on every platform; `/x` has no drive on Windows.
+    fn absolute_uri_file() -> String {
+        std::env::temp_dir().join("nwc-uri").display().to_string()
+    }
+
     #[test]
     fn args_require_an_absolute_uri_file_and_reject_unknown_flags() {
+        let uri_file = absolute_uri_file();
         let missing = args(&[]).unwrap_err().to_string();
         assert!(missing.contains("--uri-file"), "{missing}");
         assert!(args(&["--uri-file", "nwc-uri"]).is_err());
@@ -273,13 +279,14 @@ mod tests {
             args(&["--uri", URI]).is_err(),
             "an inline URI must not be accepted"
         );
-        assert!(args(&["--uri-file", "/x", "--poll-interval-ms", "0"]).is_err());
-        args(&["--uri-file", "/home/me/nwc-uri"]).unwrap();
+        assert!(args(&["--uri-file", &uri_file, "--poll-interval-ms", "0"]).is_err());
+        args(&["--uri-file", &uri_file]).unwrap();
     }
 
     #[test]
     fn timing_defaults_can_be_overridden() {
-        let timing = args(&["--uri-file", "/x", "--poll-interval-ms", "500"])
+        let uri_file = absolute_uri_file();
+        let timing = args(&["--uri-file", &uri_file, "--poll-interval-ms", "500"])
             .unwrap()
             .timing();
         assert_eq!(timing.poll_interval, Duration::from_millis(500));
