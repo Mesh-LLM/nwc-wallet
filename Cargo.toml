@@ -13,8 +13,8 @@ async-trait = "0.1"
 clap = { version = "4", features = ["derive"] }
 futures = "0.3"
 hex = "0.4"
-mesh-llm-plugin = { git = "https://github.com/Mesh-LLM/mesh-llm", rev = "bd5514dd8de8db64d42975d04de0b0ad0583c7ba" }
-mesh-llm-wallet = { git = "https://github.com/Mesh-LLM/mesh-llm", rev = "bd5514dd8de8db64d42975d04de0b0ad0583c7ba", features = ["plugin-server"] }
+mesh-llm-plugin = { git = "https://github.com/Mesh-LLM/mesh-llm", rev = "60697c61755b7280c22d3ab9d9bcf5b663e8ae3b" }
+mesh-llm-wallet = { git = "https://github.com/Mesh-LLM/mesh-llm", rev = "60697c61755b7280c22d3ab9d9bcf5b663e8ae3b", features = ["plugin-server"] }
 # NIP-47 URI parsing and the NIP-04/NIP-44 ciphers it negotiates.
 nostr = { version = "0.45", default-features = false, features = ["std", "os-rng", "nip47"] }
 nostr-sdk = { version = "0.45.1", default-features = false }
@@ -29,7 +29,7 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["e
 bitcoin = { version = "0.32", features = ["secp-recovery"] }
 flate2 = "1"
 lightning-invoice = { version = "0.35.0-rc1", features = ["std"] }
-mesh-llm-plugin-manager = { git = "https://github.com/Mesh-LLM/mesh-llm", rev = "bd5514dd8de8db64d42975d04de0b0ad0583c7ba" }
+mesh-llm-plugin-manager = { git = "https://github.com/Mesh-LLM/mesh-llm", rev = "60697c61755b7280c22d3ab9d9bcf5b663e8ae3b" }
 # In-process relay for transport tests.
 nostr-sdk = { version = "0.45.1", default-features = false, features = ["local-relay"] }
 tar = "0.4"
